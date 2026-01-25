@@ -1,0 +1,18 @@
+[package]
+name = "ls_tool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+colored = "3.1.1"
+chrono = "0.4"
+terminal_size = "0.4.3"
+is-terminal = "0.4"
+windows = { version = "0.62.2", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_Foundation",
+    "Win32_System_IO"
+]}
+tempfile = "3.10"
