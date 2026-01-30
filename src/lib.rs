@@ -467,11 +467,20 @@ pub fn process_path(path: &Path, args: &Args, classify_when: &str) -> io::Result
         }
     };
 
-    let name: String = path
-        .file_name()
-        .unwrap_or(path.as_os_str())
-        .to_string_lossy()
-        .to_string();
+    // Special handling for . and ..
+    let name: String = {
+        let path_str = path.to_string_lossy();
+        if path_str.ends_with("\\.") || path_str.ends_with("/.") {
+            ".".to_string()
+        } else if path_str.ends_with("\\..") || path_str.ends_with("/..") {
+            "..".to_string()
+        } else {
+            path.file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .to_string()
+        }
+    };
 
     let mut display_name = name.clone();
 
@@ -948,13 +957,14 @@ pub fn render(entries: Vec<FileEntry>, args: &Args) -> io::Result<()> {
 
     let use_color = should_use_color(args);
 
-    if args.one || (args.long && !args.columns && !args.across) {
+    // If inode, size, or author flags are set, use single-entry format
+    if args.one || args.inode || args.size || args.author || args.long {
         for e in &entries {
             render_entry(e, args, use_color);
         }
-    } else if args.columns && !args.long && !args.across {
+    } else if args.columns && !args.across {
         render_columns(&entries, args, use_color);
-    } else if args.across && !args.long {
+    } else if args.across {
         render_across(&entries, args, use_color);
     } else {
         render_grid(&entries, args, use_color)?;
