@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5.60", features = ["derive"] }
 colored = "3.1.1"
-chrono = "0.4"
+chrono = "0.4.44"
 terminal_size = "0.4.3"
 is-terminal = "0.4"
 windows = { version = "0.62.2", features = [
@@ -15,4 +15,7 @@ windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_System_IO"
 ]}
-tempfile = "3.10"
+tempfile = "3.26.0"
+windows-permissions = "0.2.4"
+file-id = "0.2.3"
+winsafe = { version = "0.0.27", features = ["advapi"] }

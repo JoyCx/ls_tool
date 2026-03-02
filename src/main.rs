@@ -1,19 +1,10 @@
 use clap::Parser;
-use ls_tool::{Args, ColorWhen, run};
-use std::{io::IsTerminal, process::exit};
+use ls_tool::{Args, run};
+use std::process::exit;
 
 fn main() {
-    let args = Args::parse();
-    let color_enabled = match args.color {
-        ColorWhen::Always => true,
-        ColorWhen::Never => false,
-        ColorWhen::Auto => std::io::stdout().is_terminal(),
-    };
-    if color_enabled {
-        colored::control::set_override(true);
-    } else {
-        colored::control::set_override(false);
-    }
+    let args: Args = Args::parse();
+    colored::control::set_override(args.color.is_enabled());
 
     match run(args) {
         Ok(code) => exit(code),
