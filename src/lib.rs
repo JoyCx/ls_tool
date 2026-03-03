@@ -4,20 +4,21 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub mod args;
-pub use args::{Args, ColorWhen};
-
+pub mod formatting;
 pub mod util;
-pub use util::{escape_non_graphic, hide_control_chars, is_executable};
-
 pub mod windows_util;
+
+pub use args::{Args, ColorWhen};
+pub use formatting::{get_indicator, render, version_cmp};
+pub use util::{
+    cache_get_or_compute, cache_get_or_compute_sync, escape_non_graphic, hide_control_chars,
+    is_executable,
+};
 pub use windows_util::{
     FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
     FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM, calculate_inode,
     get_file_attributes_windows, get_owner_and_group, get_windows_permissions,
 };
-
-pub mod formatting;
-pub use formatting::{get_indicator, render, version_cmp};
 
 pub struct FileEntry {
     pub name: String,
@@ -395,8 +396,6 @@ pub fn sort_entries(entries: &mut [FileEntry], args: &Args) {
             b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name))
         } else if args.version_sort {
             version_cmp(&a.name, &b.name)
-        } else if args.ctime && args.long {
-            a.name.to_lowercase().cmp(&b.name.to_lowercase())
         } else {
             a.name.to_lowercase().cmp(&b.name.to_lowercase())
         };
