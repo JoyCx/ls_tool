@@ -3,15 +3,15 @@ use file_id::get_file_id;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
-
-pub use windows::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_SYSTEM, GetFileAttributesW, GetFileInformationByHandle,
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Storage::FileSystem::{
+    BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_ARCHIVE,
+    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY,
+    FILE_ATTRIBUTE_SYSTEM, GetFileInformationByHandle,
 };
-
 use windows_permissions::constants::{SeObjectType, SecurityInformation};
 use windows_permissions::wrappers::{GetNamedSecurityInfo, LookupAccountSid};
 
@@ -20,21 +20,20 @@ type FileAttributesCacheMap = HashMap<String, u32>;
 type InodeCacheMap = HashMap<String, u64>;
 type PermissionsCacheMap = HashMap<(String, u32), String>;
 
-// Cache for file ownership/group (SID lookups)
-// Mutex ensures thread safety during cache operations
 static SID_CACHE: OnceLock<Mutex<SidCacheMap>> = OnceLock::new();
-
-// Cache for file attributes by path
-// Prevents repeated GetFileAttributesW calls for the same file
 static FILE_ATTRIBUTES_CACHE: OnceLock<Mutex<FileAttributesCacheMap>> = OnceLock::new();
-
-// Cache for inode calculations by path
-// Prevents repeated file_id lookups and hash computations
 static INODE_CACHE: OnceLock<Mutex<InodeCacheMap>> = OnceLock::new();
-
-// Cache for permission strings (keyed by path + file_attributes)
-// Prevents recalculating the same permission string multiple times
 static PERMISSIONS_CACHE: OnceLock<Mutex<PermissionsCacheMap>> = OnceLock::new();
+
+pub fn get_nlink(path: &Path) -> io::Result<u32> {
+    let file = fs::File::open(path)?;
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    unsafe {
+        GetFileInformationByHandle(HANDLE(file.as_raw_handle() as _), &mut info)
+            .map_err(|e| io::Error::other(e.to_string()))?;
+    }
+    Ok(info.nNumberOfLinks)
+}
 
 pub fn get_file_attributes_windows(path: &Path) -> io::Result<u32> {
     use std::os::windows::fs::MetadataExt;
@@ -51,7 +50,6 @@ pub fn get_owner_and_group(path: &Path) -> io::Result<(String, String, String, S
     let path_str = path.to_string_lossy().to_string();
 
     cache_get_or_compute(&SID_CACHE, path_str, || {
-        // Get the security descriptor
         let sd = GetNamedSecurityInfo(
             path,
             SeObjectType::SE_FILE_OBJECT,
@@ -59,26 +57,27 @@ pub fn get_owner_and_group(path: &Path) -> io::Result<(String, String, String, S
         )
         .map_err(|e| io::Error::other(format!("Failed to get security info: {}", e)))?;
 
-        // Extract owner SID
-        let owner_name = if let Some(owner_sid) = sd.owner() {
-            lookup_sid_name(owner_sid).unwrap_or_else(|| "Unknown".to_string())
+        let (owner_name, owner_sid_str) = if let Some(owner_sid) = sd.owner() {
+            let name = lookup_sid_name(owner_sid).unwrap_or_else(|| "Unknown".to_string());
+            let sid_str = owner_sid.to_string();
+            (name, sid_str)
         } else {
-            "Unknown".to_string()
+            ("Unknown".to_string(), String::new())
         };
 
-        // Extract group SID
-        let mut group_name = if let Some(group_sid) = sd.group() {
-            lookup_sid_name(group_sid).unwrap_or_else(|| "Users".to_string())
+        let (mut group_name, group_sid_str) = if let Some(group_sid) = sd.group() {
+            let name = lookup_sid_name(group_sid).unwrap_or_else(|| "Users".to_string());
+            let sid_str = group_sid.to_string();
+            (name, sid_str)
         } else {
-            "Users".to_string()
+            ("Users".to_string(), String::new())
         };
 
-        // Default fallback for group
         if group_name == "Unknown" || group_name.is_empty() {
             group_name = "Users".to_string();
         }
 
-        Ok((owner_name, String::new(), group_name, String::new()))
+        Ok((owner_name, owner_sid_str, group_name, group_sid_str))
     })
 }
 
@@ -106,8 +105,6 @@ pub fn calculate_inode(path: &Path) -> std::io::Result<u64> {
     cache_get_or_compute(&INODE_CACHE, path_str, || {
         get_file_id(path)
             .map(|fid| {
-                // get_file_id returns a FileId that contains the inode info
-                // Hash it to get a u64 representation
                 use std::collections::hash_map::DefaultHasher;
                 use std::hash::{Hash, Hasher};
                 let mut hasher = DefaultHasher::new();
@@ -180,4 +177,21 @@ pub fn get_windows_permissions(
 
         perms
     })
+}
+
+/// Get the actual number of bytes allocated on disk for a file.
+/// Uses GetCompressedFileSizeW which works for compressed/sparse files.
+pub fn get_allocated_size(path: &Path) -> io::Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Storage::FileSystem::GetCompressedFileSizeW;
+    use windows::core::PCWSTR;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut high: u32 = 0;
+    let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
+    if low == 0xFFFFFFFF_u32 {
+        return Err(io::Error::last_os_error());
+    }
+    let size = (high as u64) << 32 | low as u64;
+    Ok(size)
 }

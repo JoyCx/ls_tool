@@ -12,7 +12,6 @@ pub enum ColorWhen {
     Never,
 }
 
-//converts enum to string in print formatting
 impl fmt::Display for ColorWhen {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -33,9 +32,18 @@ impl ColorWhen {
     }
 }
 
+/// Parse and validate the optional argument to --classify
+fn parse_classify_value(s: &str) -> Result<String, String> {
+    match s {
+        "never" | "always" => Ok(s.to_string()),
+        _ => Err(format!(
+            "invalid value '{}' for --classify; expected 'never' or 'always'",
+            s
+        )),
+    }
+}
+
 /// Command line arguments for ls
-///
-/// default value, custom parsing function/auto parsing using enum, and long "--var" vs short "-v"
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about = "Rust ls clone for Windows")]
 pub struct Args {
@@ -78,7 +86,7 @@ pub struct Args {
     #[arg(short = 'f')]
     pub unsorted_all: bool,
 
-    #[arg(short = 'F', long, conflicts_with = "file_type")]
+    #[arg(short = 'F', long, conflicts_with = "file_type", value_parser = parse_classify_value)]
     pub classify: Option<Option<String>>,
 
     #[arg(long, conflicts_with = "classify")]
@@ -135,13 +143,17 @@ pub struct Args {
     #[arg(short = 'x')]
     pub across: bool,
 
-    #[arg(long, default_value = "locale", value_parser = ["locale", "long-iso", "iso", "full-iso"])]
+    #[arg(long, default_value = "locale")]
     pub time_style: String,
 
     #[arg(long)]
     pub show_control_chars: bool,
 
-    #[arg(long, hide = true)]
+    #[arg(
+        long, 
+        value_parser = ["literal", "shell", "shell-always", "c", "escape"],
+        help = "Control how file names are quoted"
+    )]
     pub quoting_style: Option<String>,
 }
 
@@ -151,23 +163,18 @@ pub fn parse_path(s: &str) -> Result<PathBuf, String> {
 }
 
 /// Parse and validate block size argument
-///
-/// Converts input to uppercase and validates allowed suffixes.
-/// Examples: 10k, 10Kb, 10mb all become 10K, 10KB, 10MB
 pub fn parse_block_size(s: &str) -> Result<String, String> {
     let s = s.to_uppercase();
-    // reject empty input
     if s.is_empty() {
         return Err("Block size cannot be empty".to_string());
     }
-    // these are the only suffixes allowed for block size
-    let valid_suffixes = ["", "K", "KB", "M", "MB", "G", "GB", "T", "TB"];
-    // split into digits vs non-digits
+    let valid_suffixes = [
+        "", "K", "KB", "KIB", "KI", "M", "MB", "MIB", "MI", "G", "GB", "GIB", "GI", "T", "TB",
+        "TIB", "TI",
+    ];
     let (num_part, suffix_part): (String, String) = s.chars().partition(|c| c.is_ascii_digit());
-    // If there are no digits at all and the suffix is not in the allowed list
     if num_part.is_empty() && !valid_suffixes.contains(&suffix_part.as_str()) {
         return Err(format!("Invalid block size suffix: {}", suffix_part));
     }
-    // we have at least an ok suffix / number
     Ok(s)
 }

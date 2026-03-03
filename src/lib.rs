@@ -12,23 +12,26 @@ pub use args::{Args, ColorWhen};
 pub use formatting::{get_indicator, render, version_cmp};
 pub use util::{
     cache_get_or_compute, cache_get_or_compute_sync, escape_non_graphic, hide_control_chars,
-    is_executable,
+    is_backup_file, is_executable,
 };
 pub use windows_util::{
+    calculate_inode, get_allocated_size, get_file_attributes_windows, get_nlink, get_owner_and_group,
+    get_windows_permissions,
+};
+pub use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
-    FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM, calculate_inode,
-    get_file_attributes_windows, get_owner_and_group, get_windows_permissions,
+    FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
 };
 
 pub struct FileEntry {
     pub name: String,
-    pub display_name: String,
     pub is_dir: bool,
     pub is_symlink: bool,
     pub is_hidden: bool,
     pub is_system: bool,
     pub is_readonly: bool,
     pub size: u64,
+    pub allocated_bytes: u64, // actual disk usage in bytes (for -s)
     pub modified: SystemTime,
     pub created: SystemTime,
     pub accessed: SystemTime,
@@ -40,27 +43,30 @@ pub struct FileEntry {
     pub permissions: String,
     pub file_attributes: u32,
     pub inode: u64,
+    pub nlink: u32,
     pub path: PathBuf,
 }
 
 pub fn run(mut args: Args) -> io::Result<i32> {
-    /*
-    if user passed -f (unsorted_all):
-    force --all
-    force --no-sort
-    */
+    // --author implies long format (GNU behaviour)
+    if args.author && !args.long {
+        args.long = true;
+    }
+
+    // -f overrides: -a, -U, and disables all extra formatting
     if args.unsorted_all {
         args.all = true;
         args.no_sort = true;
+        args.long = false;
+        args.size = false;
+        args.author = false;
+        args.inode = false;
+        args.ctime = false;
+        args.atime = false;
+        args.escape = false;
+        args.human_readable = false;
     }
 
-    /*
-    CLI input	                classify_when
-    --classify=never	        "never"
-    --classify (no value)	    "always"
-    not provided + --file-type	"always"
-    neither provided	        "never"
-    */
     let classify_when = match &args.classify {
         Some(Some(when)) => when.clone(),
         Some(None) => "always".to_string(),
@@ -73,11 +79,6 @@ pub fn run(mut args: Args) -> io::Result<i32> {
         }
     };
 
-    /*
-    exit code starts at 0 (success).
-    if no path arguments were given:
-    default to "." (current directory).
-    */
     let mut exit_code = 0;
     let paths = if args.path.is_empty() {
         vec![PathBuf::from(".")]
@@ -85,19 +86,18 @@ pub fn run(mut args: Args) -> io::Result<i32> {
         args.path.clone()
     };
 
-    // used to make newline between entries
     let mut first_path = true;
+    let mut dired_offsets = if args.dired { Some(Vec::new()) } else { None };
+
     for path in paths.iter() {
         if paths.len() > 1 {
             if !first_path {
                 println!();
             }
-            // actual path printing
             println!("{}:", path.display());
             first_path = false;
         }
 
-        // metadata current path
         let mut entries = Vec::new();
 
         if args.recursive {
@@ -121,7 +121,7 @@ pub fn run(mut args: Args) -> io::Result<i32> {
                                 println!("{}:", dir_path.display());
                             }
                             if !dir_entries.is_empty() {
-                                render(dir_entries, &args)?;
+                                render(dir_entries, &args, dired_offsets.as_mut())?;
                             }
                         }
                     }
@@ -162,10 +162,9 @@ pub fn run(mut args: Args) -> io::Result<i32> {
                         if !args.all && !args.almost_all && name.starts_with('.') {
                             continue;
                         }
-                        if args.ignore_backups && name.ends_with('~') {
+                        if args.ignore_backups && is_backup_file(&name) {
                             continue;
                         }
-
                         match process_path(&entry.path(), &args, &classify_when) {
                             Ok(e) => {
                                 if !args.all && !args.almost_all && e.is_hidden {
@@ -195,7 +194,14 @@ pub fn run(mut args: Args) -> io::Result<i32> {
             sort_entries(&mut entries, &args);
         }
 
-        render(entries, &args)?;
+        render(entries, &args, dired_offsets.as_mut())?;
+    }
+
+    // Print dired footer if needed
+    if let Some(offsets) = dired_offsets {
+        let mut footer = String::new();
+        formatting::append_dired_footer(&mut footer, offsets);
+        print!("{}", footer);
     }
 
     Ok(exit_code)
@@ -230,7 +236,7 @@ pub fn collect_recursive_entries(
                 if !args.all && !args.almost_all && name.starts_with('.') {
                     continue;
                 }
-                if args.ignore_backups && name.ends_with('~') {
+                if args.ignore_backups && is_backup_file(&name) {
                     continue;
                 }
 
@@ -304,7 +310,6 @@ pub fn process_path(path: &Path, args: &Args, classify_when: &str) -> io::Result
         }
     };
 
-    // Special handling for . and ..
     let name: String = {
         let path_str = path.to_string_lossy();
         if path_str.ends_with("\\.") || path_str.ends_with("/.") {
@@ -318,14 +323,6 @@ pub fn process_path(path: &Path, args: &Args, classify_when: &str) -> io::Result
                 .to_string()
         }
     };
-
-    let mut display_name = name.clone();
-
-    if args.escape {
-        display_name = escape_non_graphic(&display_name);
-    } else if args.hide_control_chars && !args.show_control_chars {
-        display_name = hide_control_chars(&display_name);
-    }
 
     let file_attributes = get_file_attributes_windows(path).unwrap_or(0);
     let is_symlink = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT.0) != 0;
@@ -351,17 +348,30 @@ pub fn process_path(path: &Path, args: &Args, classify_when: &str) -> io::Result
         (String::new(), String::new(), String::new(), String::new())
     };
 
+    let nlink = if args.long {
+        windows_util::get_nlink(path).unwrap_or(1)
+    } else {
+        1
+    };
+
     let inode = calculate_inode(path).unwrap_or(0);
+
+    // Allocated size (for -s) – compute only if needed
+    let allocated_bytes = if args.size {
+        windows_util::get_allocated_size(path).unwrap_or(metadata.len())
+    } else {
+        0
+    };
 
     Ok(FileEntry {
         name,
-        display_name,
         is_dir,
         is_symlink,
         is_hidden,
         is_system,
         is_readonly,
         size: metadata.len(),
+        allocated_bytes,
         modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
         created: metadata.created().unwrap_or(SystemTime::UNIX_EPOCH),
         accessed: metadata.accessed().unwrap_or(SystemTime::UNIX_EPOCH),
@@ -373,6 +383,7 @@ pub fn process_path(path: &Path, args: &Args, classify_when: &str) -> io::Result
         permissions,
         file_attributes,
         inode,
+        nlink,
         path: path.to_path_buf(),
     })
 }

@@ -131,3 +131,7 @@ where
 
     result
 }
+
+pub fn is_backup_file(name: &str) -> bool {
+    name.ends_with('~')
+}
