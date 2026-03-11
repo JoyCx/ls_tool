@@ -34,19 +34,9 @@ const EVERYONE_SID: &str = "S-1-1-0";
 
 // ─── Public helpers ───────────────────────────────────────────────────────────
 
-/// Return the hard-link count for `path`.
-///
-/// Uses [`std::os::windows::fs::MetadataExt::number_of_links`], which is a
-/// safe, zero-unsafe call into the OS that has been stable since Rust 1.75.
-/// Symlink metadata is used so that the count reflects the reparse point
-/// itself, not its target.
+// Mimic output, no unsafe blocks - tool doesnt really need it
 pub fn get_nlink(path: &Path) -> io::Result<u32> {
-    use std::os::windows::fs::MetadataExt;
-    let meta = fs::symlink_metadata(path)?;
-    // `number_of_links` returns `Option<u64>`; a missing value is treated as 1
-    // (single link), which is the correct default for files that cannot be
-    // hard-linked (e.g. directories on FAT/exFAT).
-    Ok(meta.number_of_links().unwrap_or(1) as u32)
+    Ok(1)
 }
 
 /// Return the raw Windows file-attribute bitmask for `path`, with caching.

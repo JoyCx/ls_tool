@@ -14,6 +14,4 @@ windows-permissions = "0.2.4"
 windows-acl = "0.3.0"
 filesize = "0.2.0"
 file-id = "0.2.3"
-# "kernel" adds safe wrappers for kernel32 fns (GetCompressedFileSize, HFILE, etc.)
-# "advapi" / "shell" cover the security / SID helpers used transitively
 winsafe = { version = "0.0.27", features = ["advapi", "shell", "kernel"] }
