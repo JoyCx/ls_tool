@@ -14,13 +14,19 @@ pub use util::{
     cache_get_or_compute, cache_get_or_compute_sync, escape_non_graphic, hide_control_chars,
     is_backup_file, is_executable,
 };
+
+// Standard Windows file-attribute bitmask constants.
+// These are stable, well-documented values from the Win32 SDK; no FFI needed.
+pub const FILE_ATTRIBUTE_READONLY: u32 = 0x0000_0001;
+pub const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0000_0002;
+pub const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
+pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
+pub const FILE_ATTRIBUTE_ARCHIVE: u32 = 0x0000_0020;
+pub const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+
 pub use windows_util::{
-    calculate_inode, get_allocated_size, get_file_attributes_windows, get_nlink, get_owner_and_group,
-    get_windows_permissions,
-};
-pub use windows::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN,
-    FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_SYSTEM,
+    calculate_inode, get_allocated_size, get_file_attributes_windows, get_nlink,
+    get_owner_and_group, get_windows_permissions,
 };
 
 pub struct FileEntry {
@@ -325,11 +331,13 @@ pub fn process_path(path: &Path, args: &Args, classify_when: &str) -> io::Result
     };
 
     let file_attributes = get_file_attributes_windows(path).unwrap_or(0);
-    let is_symlink = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT.0) != 0;
-    let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-    let is_hidden = (file_attributes & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-    let is_system = (file_attributes & FILE_ATTRIBUTE_SYSTEM.0) != 0;
-    let is_readonly = (file_attributes & FILE_ATTRIBUTE_READONLY.0) != 0;
+
+    // Plain u32 bitmask checks — no `.0` newtype accessor needed.
+    let is_symlink = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+    let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    let is_hidden = (file_attributes & FILE_ATTRIBUTE_HIDDEN) != 0;
+    let is_system = (file_attributes & FILE_ATTRIBUTE_SYSTEM) != 0;
+    let is_readonly = (file_attributes & FILE_ATTRIBUTE_READONLY) != 0;
 
     let indicator = get_indicator(path, is_symlink, is_dir, classify_when, args.file_type);
 
