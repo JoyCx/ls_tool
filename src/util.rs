@@ -22,6 +22,7 @@ pub fn escape_non_graphic(s: &str) -> String {
             '\x0c' => "\\f".to_string(),
             '\x0b' => "\\v".to_string(),
             '\\' => "\\\\".to_string(),
+            ' ' => "\\ ".to_string(),
             c if c.is_control() => format!("\\{:03o}", c as u8),
             _ => c.to_string(),
         })
