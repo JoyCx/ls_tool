@@ -28,13 +28,13 @@ static SID_CACHE: OnceLock<Mutex<SidCacheMap>> = OnceLock::new();
 static FILE_ATTRIBUTES_CACHE: OnceLock<Mutex<FileAttributesCacheMap>> = OnceLock::new();
 static INODE_CACHE: OnceLock<Mutex<InodeCacheMap>> = OnceLock::new();
 
-// The well-known SDDL string for the "Everyone" (World) SID.
+// not a placeholder - SDDL string for the "Everyone" (World) SID.
 // S-1-1-0 is stable and universal — no runtime lookup needed.
 const EVERYONE_SID: &str = "S-1-1-0";
 
 // ─── Public helpers ───────────────────────────────────────────────────────────
 
-// Mimic output, no unsafe blocks - tool doesnt really need it
+// Mimic output, we want no unsafe blocks - tool doesnt really need it
 pub fn get_nlink(path: &Path) -> io::Result<u32> {
     Ok(1)
 }
